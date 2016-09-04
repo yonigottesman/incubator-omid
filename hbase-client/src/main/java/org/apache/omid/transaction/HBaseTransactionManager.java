@@ -23,6 +23,9 @@ import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.client.*;
+import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.omid.committable.CommitTable;
 import org.apache.omid.committable.CommitTable.CommitTimestamp;
 import org.apache.omid.committable.hbase.HBaseCommitTable;
@@ -30,13 +33,12 @@ import org.apache.omid.committable.hbase.HBaseCommitTableConfig;
 import org.apache.omid.tools.hbase.HBaseLogin;
 import org.apache.omid.tso.client.CellId;
 import org.apache.omid.tso.client.TSOClient;
-import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -200,11 +202,45 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
     // ----------------------------------------------------------------------------------------------------------------
 
     @Override
+    public boolean commitLeader(AbstractTransaction<? extends CellId> transaction, long commitTs)
+    {
+
+        boolean committed = false;
+        HBaseTransaction hBaseTx = enforceHBaseTransactionAsParam(transaction);
+        HBaseCellId leader = hBaseTx.getLeader();
+        byte[] leaderShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(leader.getQualifier(),
+                Bytes.toBytes("__TS__"+String.valueOf(transaction.getStartTimestamp()))));
+
+        Put shadowCellPut = new Put(leader.getRow());
+        shadowCellPut.add(leader.getFamily(),
+                leaderShadowCellQualifier,
+                leader.getTimestamp(),
+                Bytes.toBytes(commitTs));
+
+        byte[] leaderInvalidatedQualifier = Bytes.add(leader.getQualifier(),
+                Bytes.toBytes("__INVALID__"+String.valueOf(leader.getTimestamp())));
+
+        try {
+            committed = leader.getTable().checkAndPut(leader.getRow(),leader.getFamily(),
+                    leaderInvalidatedQualifier,
+                    null,shadowCellPut);
+            //LOG.info("Commited?? {}",committed);
+        } catch (IOException e) {
+            LOG.warn("{}: Error inserting shadow cell to leader {}", leader.getTimestamp(), leader, e);
+            return false;
+        } finally {
+            return committed;
+        }
+
+    }
+
+    @Override
     public boolean isCommitted(HBaseCellId hBaseCellId) throws TransactionException {
         try {
             CommitTimestamp tentativeCommitTimestamp =
                     locateCellCommitTimestamp(hBaseCellId.getTimestamp(), tsoClient.getEpoch(),
-                                              new CommitTimestampLocatorImpl(hBaseCellId, Maps.<Long, Long>newHashMap()));
+                                              new CommitTimestampLocatorImpl(hBaseCellId, Maps.<Long, Long>newHashMap(),
+                                                      Maps.<Long, String>newHashMap()));
 
             // If transaction that added the cell was invalidated
             if (!tentativeCommitTimestamp.isValid()) {
@@ -212,6 +248,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             }
 
             switch (tentativeCommitTimestamp.getLocation()) {
+                case LEADER:
                 case COMMIT_TABLE:
                 case SHADOW_CELL:
                     return true;
@@ -257,10 +294,18 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
 
         private HBaseCellId hBaseCellId;
         private final Map<Long, Long> commitCache;
+        private final Map<Long, String> leaderMap;
+
+        CommitTimestampLocatorImpl(HBaseCellId hBaseCellId, Map<Long, Long> commitCache, Map<Long, String> leaderMap) {
+            this.hBaseCellId = hBaseCellId;
+            this.commitCache = commitCache;
+            this.leaderMap = leaderMap;
+        }
 
         CommitTimestampLocatorImpl(HBaseCellId hBaseCellId, Map<Long, Long> commitCache) {
             this.hBaseCellId = hBaseCellId;
             this.commitCache = commitCache;
+            this.leaderMap = Maps.<Long, String>newHashMap();
         }
 
         @Override
@@ -287,6 +332,50 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             return Optional.absent();
         }
 
+        @Override
+        public Optional<Long> readCommitTimestampFromLeader(long startTimestamp) throws IOException {
+
+            String leader = leaderMap.get(startTimestamp);
+            String[] leaderParts = leader.split(":");
+            byte[] leaderTable = Bytes.toBytes(leaderParts[0]);
+            byte[] leaderRow = Bytes.toBytes(leaderParts[1]);
+            byte[] leaderFamily = Bytes.toBytes(leaderParts[2]);
+            byte[] leaderQualifier = Bytes.toBytes(leaderParts[3]);
+            byte[] leaderShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(leaderQualifier,
+                    Bytes.toBytes("__TS__"+String.valueOf(startTimestamp))));
+            HTableInterface leaderHTable = new HTable(HBaseConfiguration.create(),leaderTable);
+
+//            LOG.info("readCommitTimestampFromLeader tx={}, leader={} {} {} {} {}",startTimestamp,leaderParts[0],
+//                    leaderParts[1],leaderParts[2],leaderParts[3],leaderParts[4]);
+
+            Put invalidationPut = new Put(leaderRow );
+            byte[] leaderInvalidatedQualifier = Bytes.add(leaderQualifier,Bytes.toBytes("__INVALID__"+String.valueOf(startTimestamp)));
+            invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
+                    startTimestamp,Bytes.toBytes(0));
+
+            boolean invalidated = leaderHTable.checkAndPut(leaderRow, leaderFamily, leaderShadowCellQualifier,
+                    CompareFilter.CompareOp.NOT_EQUAL,
+                    null, invalidationPut);
+            if (invalidated) {
+                //TODO check if regular shadow cell exists, and remove invalidation.
+                return Optional.absent();
+            }
+
+            Get get = new Get(leaderRow);
+            get.addColumn(leaderFamily,leaderShadowCellQualifier);
+            get.setMaxVersions(1);
+            get.setTimeStamp(startTimestamp);
+            Result result = leaderHTable.get(get);
+            if (result.containsColumn(leaderFamily,leaderShadowCellQualifier) ) {
+                return Optional.of(Bytes.toLong(result.getValue(leaderFamily,leaderShadowCellQualifier)));
+            }
+            else
+            {
+                LOG.info("ERROR didnt invalidate and didnt get TS ");
+                return Optional.absent();
+            }
+
+        }
     }
 
 }

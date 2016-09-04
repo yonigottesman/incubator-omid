@@ -19,6 +19,7 @@ package org.apache.omid.transaction;
 
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
+import org.apache.hadoop.hbase.client.Delete;
 import org.apache.omid.committable.CommitTable;
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.metrics.Timer;
@@ -42,6 +43,7 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
     private final Timer commitTableUpdateTimer;
     private final Timer shadowCellsUpdateTimer;
+    private final Timer leaderCellsDeleteTimer;
 
     public HBaseSyncPostCommitter(MetricsRegistry metrics, CommitTable.Client commitTableClient) {
         this.metrics = metrics;
@@ -49,6 +51,7 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
         this.commitTableUpdateTimer = metrics.timer(name("omid", "tm", "hbase", "commitTableUpdate", "latency"));
         this.shadowCellsUpdateTimer = metrics.timer(name("omid", "tm", "hbase", "shadowCellsUpdate", "latency"));
+        this.leaderCellsDeleteTimer = metrics.timer(name("omid", "tm", "hbase", "leaderCellsDelete", "latency"));
     }
 
     @Override
@@ -96,7 +99,7 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
     @Override
     public ListenableFuture<Void> removeCommitTableEntry(AbstractTransaction<? extends CellId> transaction) {
-
+//TODO name of var is wrong?
         SettableFuture<Void> updateSCFuture = SettableFuture.create();
 
         HBaseTransaction tx = HBaseTransactionManager.enforceHBaseTransactionAsParam(transaction);
@@ -120,6 +123,44 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
         return updateSCFuture;
 
+    }
+
+    @Override
+    public ListenableFuture<Void> removeLeaderCells(AbstractTransaction<? extends CellId> transaction) {
+        SettableFuture<Void> removeLeaderFuture = SettableFuture.create();
+
+        HBaseTransaction tx = HBaseTransactionManager.enforceHBaseTransactionAsParam(transaction);
+
+        leaderCellsDeleteTimer.start();
+
+        try {
+            // remove LeaderCells
+            for (HBaseCellId cell : tx.getWriteSet()) {
+                Delete delete = new Delete(cell.getRow());
+                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()));
+                delete.setTimestamp(tx.getStartTimestamp());
+                try {
+                    cell.getTable().delete(delete);
+
+                } catch (IOException e) {
+                    LOG.warn("{}: Error deleting leader cell of {}", tx, cell, e);
+                    removeLeaderFuture.setException(
+                            new TransactionManagerException(tx + ": Error deleting leader cell of " + cell, e));
+                }
+            }
+            try {
+                tx.flushTables();
+                removeLeaderFuture.set(null);
+            } catch (IOException e) {
+                LOG.warn("{}: Error deleting leader cell of", tx, e);
+                removeLeaderFuture.setException(new TransactionManagerException(tx + ": Error deleting leader cell of", e));
+            }
+
+        } finally {
+            leaderCellsDeleteTimer.stop();
+        }
+
+        return removeLeaderFuture;
     }
 
 }

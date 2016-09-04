@@ -48,6 +48,7 @@ public final class CellUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(CellUtils.class);
     static final byte[] SHADOW_CELL_SUFFIX = "\u0080".getBytes(Charsets.UTF_8); // Non printable char (128 ASCII)
+    static final byte[] LEADER_CELL_SUFFIX = "\u0081".getBytes(Charsets.UTF_8); // Non printable char (129 ASCII)
     static byte[] DELETE_TOMBSTONE = Bytes.toBytes("__OMID_TOMBSTONE__");
 
     /**
@@ -124,6 +125,31 @@ public final class CellUtils {
      */
     public static byte[] addShadowCellSuffix(byte[] qualifier) {
         return addShadowCellSuffix(qualifier, 0, qualifier.length);
+    }
+
+    /**
+     * Builds a new qualifier composed of the HBase qualifier passed + the leader cell suffix.
+     * @param qualifierArray the qualifier to be suffixed
+     * @param qualOffset the offset where the qualifier starts
+     * @param qualLength the qualifier length
+     * @return the suffixed qualifier
+     */
+    public static byte[] addLeaderCellSuffix(byte[] qualifierArray, int qualOffset, int qualLength) {
+        byte[] result = new byte[qualLength + LEADER_CELL_SUFFIX.length];
+        System.arraycopy(qualifierArray, qualOffset, result, 0, qualLength);
+        System.arraycopy(LEADER_CELL_SUFFIX, 0, result, qualLength, LEADER_CELL_SUFFIX.length);
+        return result;
+    }
+
+    /**
+     * Builds a new qualifier composed of the HBase qualifier passed + the leader cell suffix.
+     * Contains a reduced signature to avoid boilerplate code in client side.
+     * @param qualifier
+     *            the qualifier to be suffixed
+     * @return the suffixed qualifier
+     */
+    public static byte[] addLeaderCellSuffix(byte[] qualifier) {
+        return addLeaderCellSuffix(qualifier, 0, qualifier.length);
     }
 
     /**
@@ -209,6 +235,20 @@ public final class CellUtils {
         int qualLength = cell.getQualifierLength();
 
         return endsWith(qualifier, qualOffset, qualLength, SHADOW_CELL_SUFFIX);
+    }
+
+    /**
+     * Returns whether a cell contains a qualifier that is a leader cell
+     * column qualifier or not.
+     * @param cell the cell to check if contains the shadow cell qualifier
+     * @return whether the cell passed contains a shadow cell qualifier or not
+     */
+    public static boolean isLeaderCell(Cell cell) {
+        byte[] qualifier = cell.getQualifierArray();
+        int qualOffset = cell.getQualifierOffset();
+        int qualLength = cell.getQualifierLength();
+
+        return endsWith(qualifier, qualOffset, qualLength, LEADER_CELL_SUFFIX);
     }
 
     private static boolean endsWith(byte[] value, int offset, int length, byte[] suffix) {
