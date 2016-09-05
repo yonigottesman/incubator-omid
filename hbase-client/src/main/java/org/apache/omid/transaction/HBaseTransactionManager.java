@@ -218,7 +218,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                 Bytes.toBytes(commitTs));
 
         byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leader.getQualifier(),
-                Bytes.toBytes(String.valueOf(leader.getTimestamp()))));
+                Bytes.toBytes("__"+String.valueOf(leader.getTimestamp()))));
 
         try {
             committed = leader.getTable().checkAndPut(leader.getRow(),leader.getFamily(),
@@ -346,7 +346,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
 
             Put invalidationPut = new Put(leaderRow );
             byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leaderQualifier,
-                    Bytes.toBytes(String.valueOf(startTimestamp))));
+                    Bytes.toBytes("__"+String.valueOf(startTimestamp))));
 
             invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
                     startTimestamp,Bytes.toBytes(0));

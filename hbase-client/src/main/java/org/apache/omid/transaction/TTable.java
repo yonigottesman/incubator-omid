@@ -525,7 +525,6 @@ public class TTable implements Closeable {
         put.add(family, shadowCellQualifier, cell.getTimestamp(), Bytes.toBytes(commitTimestamp));
         try {
             healerTable.put(put);
-            //TODO add remove leader for this cell only after shadow cell is persistent
         } catch (IOException e) {
             LOG.warn("Failed healing shadow cell for kv {}", cell, e);
         }
