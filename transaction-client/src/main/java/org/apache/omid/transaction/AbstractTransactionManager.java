@@ -431,14 +431,13 @@ public abstract class AbstractTransactionManager implements TransactionManager {
         try {
             long commitTs = tsoClient.commit(tx.getStartTimestamp(), tx.getWriteSet()).get();
 
-            boolean result = commitLeader(tx,commitTs);
+            boolean result = commitLeader(tx, commitTs);
             if (result == false) {
                 //leader was invalidated.
                 rollback(tx);
                 rolledbackTxsCounter.inc();
                 throw new RollbackException("Leader got invalidated");
             }
-
 
             certifyCommitForTx(tx, commitTs);
             updateShadowCellsAndRemoveCommitTableEntry(tx, postCommitter);

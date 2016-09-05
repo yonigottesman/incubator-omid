@@ -132,13 +132,12 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
         HBaseTransaction tx = HBaseTransactionManager.enforceHBaseTransactionAsParam(transaction);
 
         leaderCellsDeleteTimer.start();
-
         try {
             // remove LeaderCells
             for (HBaseCellId cell : tx.getWriteSet()) {
                 Delete delete = new Delete(cell.getRow());
-                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()));
-                delete.setTimestamp(tx.getStartTimestamp());
+                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
+                        transaction.getStartTimestamp());
                 try {
                     cell.getTable().delete(delete);
 

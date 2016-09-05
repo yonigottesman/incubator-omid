@@ -217,14 +217,13 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                 leader.getTimestamp(),
                 Bytes.toBytes(commitTs));
 
-        byte[] leaderInvalidatedQualifier = Bytes.add(leader.getQualifier(),
-                Bytes.toBytes("__INVALID__"+String.valueOf(leader.getTimestamp())));
+        byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leader.getQualifier(),
+                Bytes.toBytes(String.valueOf(leader.getTimestamp()))));
 
         try {
             committed = leader.getTable().checkAndPut(leader.getRow(),leader.getFamily(),
                     leaderInvalidatedQualifier,
                     null,shadowCellPut);
-            //LOG.info("Commited?? {}",committed);
         } catch (IOException e) {
             LOG.warn("{}: Error inserting shadow cell to leader {}", leader.getTimestamp(), leader, e);
             return false;
@@ -345,11 +344,10 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                     Bytes.toBytes("__TS__"+String.valueOf(startTimestamp))));
             HTableInterface leaderHTable = new HTable(HBaseConfiguration.create(),leaderTable);
 
-//            LOG.info("readCommitTimestampFromLeader tx={}, leader={} {} {} {} {}",startTimestamp,leaderParts[0],
-//                    leaderParts[1],leaderParts[2],leaderParts[3],leaderParts[4]);
-
             Put invalidationPut = new Put(leaderRow );
-            byte[] leaderInvalidatedQualifier = Bytes.add(leaderQualifier,Bytes.toBytes("__INVALID__"+String.valueOf(startTimestamp)));
+            byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leaderQualifier,
+                    Bytes.toBytes(String.valueOf(startTimestamp))));
+
             invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
                     startTimestamp,Bytes.toBytes(0));
 

@@ -66,8 +66,9 @@ public class HBaseTransaction extends AbstractTransaction<HBaseCellId> {
         try {
 
             Delete deleteInvalidation = new Delete(leader.getRow());
-            byte[] leaderInvalidatedQualifier = Bytes.add(leader.getQualifier(),
-                    Bytes.toBytes("__INVALID__"+String.valueOf(leader.getTimestamp())));
+            byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leader.getQualifier(),
+                    Bytes.toBytes(String.valueOf(leader.getTimestamp()))));
+
             deleteInvalidation.deleteColumn(leader.getFamily(),leaderInvalidatedQualifier);
             leader.getTable().delete(deleteInvalidation);
             flushTables();
