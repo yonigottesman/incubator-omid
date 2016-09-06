@@ -138,6 +138,15 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
                 Delete delete = new Delete(cell.getRow());
                 delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
                         transaction.getStartTimestamp());
+                if (cell.toString().equals(tx.getLeader().toString()))
+                {
+                    //remove __TS__ shadowCell
+                    byte[] leaderShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(tx.getLeader().getQualifier(),
+                            Bytes.toBytes("__TS__"+String.valueOf(transaction.getStartTimestamp()))));
+
+                    delete.addColumn(tx.getLeader().getFamily(), leaderShadowCellQualifier, transaction.getStartTimestamp());
+
+                }
                 try {
                     cell.getTable().delete(delete);
 

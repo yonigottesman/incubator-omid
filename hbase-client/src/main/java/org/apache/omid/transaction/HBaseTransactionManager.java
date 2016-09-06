@@ -340,7 +340,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             byte[] leaderRow = Bytes.toBytes(leaderParts[1]);
             byte[] leaderFamily = Bytes.toBytes(leaderParts[2]);
             byte[] leaderQualifier = Bytes.toBytes(leaderParts[3]);
-            byte[] leaderShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(leaderQualifier,
+            byte[] leaderTSShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(leaderQualifier,
                     Bytes.toBytes("__TS__"+String.valueOf(startTimestamp))));
             HTableInterface leaderHTable = new HTable(HBaseConfiguration.create(),leaderTable);
 
@@ -351,21 +351,45 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
                     startTimestamp,Bytes.toBytes(0));
 
-            boolean invalidated = leaderHTable.checkAndPut(leaderRow, leaderFamily, leaderShadowCellQualifier,
+            boolean invalidated = leaderHTable.checkAndPut(leaderRow, leaderFamily, leaderTSShadowCellQualifier,
                     CompareFilter.CompareOp.NOT_EQUAL,
                     null, invalidationPut);
             if (invalidated) {
-                //TODO check if regular shadow cell exists, and remove invalidation.
+                // Two scenarios of a false invalidation:
+                //1) leader commited and removed __TS__ after updating regular shadowCell
+                //2) leader got invalidated and cleaned so leader will not be found
+
+                Get get = new Get(leaderRow);
+                get.addColumn(leaderFamily, CellUtils.addShadowCellSuffix(leaderQualifier));
+                get.addColumn(leaderFamily,leaderQualifier);
+                get.setMaxVersions(1);
+                get.setTimeStamp(startTimestamp);
+                Result result = leaderHTable.get(get);
+
+                if (result.containsColumn(leaderFamily,CellUtils.addShadowCellSuffix(leaderQualifier))) {
+                    // 1) Found regular shadowCell, so delete invalidation
+                    Delete invalidationDelete = new Delete(leaderRow);
+                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+                    leaderHTable.delete(invalidationDelete);
+                    return Optional.of(Bytes.toLong(result.getValue(leaderFamily,
+                            CellUtils.addShadowCellSuffix(leaderQualifier))));
+                } else if (!result.containsColumn(leaderFamily,leaderQualifier))
+                {
+                    //2) Leader got cleaned in the past
+                    Delete invalidationDelete = new Delete(leaderRow);
+                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+                    leaderHTable.delete(invalidationDelete);
+                }
                 return Optional.absent();
             }
 
             Get get = new Get(leaderRow);
-            get.addColumn(leaderFamily,leaderShadowCellQualifier);
+            get.addColumn(leaderFamily,leaderTSShadowCellQualifier);
             get.setMaxVersions(1);
             get.setTimeStamp(startTimestamp);
             Result result = leaderHTable.get(get);
-            if (result.containsColumn(leaderFamily,leaderShadowCellQualifier) ) {
-                return Optional.of(Bytes.toLong(result.getValue(leaderFamily,leaderShadowCellQualifier)));
+            if (result.containsColumn(leaderFamily,leaderTSShadowCellQualifier) ) {
+                return Optional.of(Bytes.toLong(result.getValue(leaderFamily,leaderTSShadowCellQualifier)));
             }
             else
             {
