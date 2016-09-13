@@ -136,10 +136,11 @@ public class TestPanicker {
                                                                  panicker,
                                                                  handlers,
                                                                  metrics);
+        ReplyProcessor replyProcessor = null;
 
         proc.addCommitToBatch(1, 2, null, new MonitoringContext(metrics));
 
-        new RequestProcessorImpl(metrics, mock(TimestampOracle.class), proc, panicker, mock(TSOServerConfig.class));
+        new RequestProcessorImpl(metrics, mock(TimestampOracle.class), proc, panicker, mock(TSOServerConfig.class), replyProcessor);
 
         verify(panicker, timeout(1000).atLeastOnce()).panic(anyString(), any(Throwable.class));
 
@@ -191,7 +192,9 @@ public class TestPanicker {
                                                                  metrics);
         proc.addCommitToBatch(1, 2, null, new MonitoringContext(metrics));
 
-        new RequestProcessorImpl(metrics, mock(TimestampOracle.class), proc, panicker, mock(TSOServerConfig.class));
+        ReplyProcessor replyProcessor = null;
+
+        new RequestProcessorImpl(metrics, mock(TimestampOracle.class), proc, panicker, mock(TSOServerConfig.class), replyProcessor);
 
         verify(panicker, timeout(1000).atLeastOnce()).panic(anyString(), any(Throwable.class));
 
