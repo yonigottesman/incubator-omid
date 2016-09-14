@@ -348,12 +348,22 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leaderQualifier,
                     Bytes.toBytes("__"+String.valueOf(startTimestamp))));
 
-            invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
-                    startTimestamp,Bytes.toBytes(0));
+//            invalidationPut.addColumn(leaderFamily,leaderInvalidatedQualifier,
+//                    startTimestamp,Bytes.toBytes(0));
 
-            boolean invalidated = leaderHTable.checkAndPut(leaderRow, leaderFamily, leaderTSShadowCellQualifier,
-                    CompareFilter.CompareOp.NOT_EQUAL,
-                    null, invalidationPut);
+            invalidationPut.add(leaderFamily,leaderInvalidatedQualifier,startTimestamp,Bytes.toBytes(0));
+
+//            boolean invalidated = leaderHTable.checkAndPut(leaderRow, leaderFamily, leaderTSShadowCellQualifier,
+//                    CompareFilter.CompareOp.NOT_EQUAL,
+//                    null, invalidationPut);
+
+            RowMutations invalidationMutation = new RowMutations(leaderRow);
+            invalidationMutation.add(invalidationPut);
+            boolean invalidated = leaderHTable.checkAndMutate(leaderRow,leaderFamily,leaderTSShadowCellQualifier,
+                    CompareFilter.CompareOp.NOT_EQUAL,null,invalidationMutation);
+
+
+
             if (invalidated) {
                 // Two scenarios of a false invalidation:
                 //1) leader commited and removed __TS__ after updating regular shadowCell
@@ -369,7 +379,8 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                 if (result.containsColumn(leaderFamily,CellUtils.addShadowCellSuffix(leaderQualifier))) {
                     // 1) Found regular shadowCell, so delete invalidation
                     Delete invalidationDelete = new Delete(leaderRow);
-                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+//                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+                    invalidationDelete.deleteColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
                     leaderHTable.delete(invalidationDelete);
                     return Optional.of(Bytes.toLong(result.getValue(leaderFamily,
                             CellUtils.addShadowCellSuffix(leaderQualifier))));
@@ -377,7 +388,8 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
                 {
                     //2) Leader got cleaned in the past
                     Delete invalidationDelete = new Delete(leaderRow);
-                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+//                    invalidationDelete.addColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
+                    invalidationDelete.deleteColumn(leaderFamily,leaderInvalidatedQualifier,startTimestamp);
                     leaderHTable.delete(invalidationDelete);
                 }
                 return Optional.absent();

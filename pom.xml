@@ -13,7 +13,7 @@
     <artifactId>omid</artifactId>
     <packaging>pom</packaging>
     <!-- WARNING: do not update version manually, use mvn versions:set -->
-    <version>0.8.2.11-SNAPSHOT</version>
+    <version>0.8.2.12345-SNAPSHOT</version>
 
     <organization>
         <name>Apache Software Foundation</name>
@@ -541,6 +541,9 @@
 
         <profile>
             <id>hbase-0</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
             <properties>
                 <hbase.version>${hbase0.version}</hbase.version>
             </properties>
@@ -548,9 +551,6 @@
 
         <profile>
             <id>hbase-1</id>
-            <activation>
-                <activeByDefault>true</activeByDefault>
-            </activation>
             <properties>
                 <hbase.version>${hbase1.version}</hbase.version>
             </properties>

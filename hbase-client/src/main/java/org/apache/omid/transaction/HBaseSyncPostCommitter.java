@@ -136,7 +136,8 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
             // remove LeaderCells
             for (HBaseCellId cell : tx.getWriteSet()) {
                 Delete delete = new Delete(cell.getRow());
-                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
+//                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
+                delete.deleteColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
                         transaction.getStartTimestamp());
                 if (cell.toString().equals(tx.getLeader().toString()))
                 {
@@ -144,7 +145,8 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
                     byte[] leaderShadowCellQualifier = CellUtils.addShadowCellSuffix(Bytes.add(tx.getLeader().getQualifier(),
                             Bytes.toBytes("__TS__"+String.valueOf(transaction.getStartTimestamp()))));
 
-                    delete.addColumn(tx.getLeader().getFamily(), leaderShadowCellQualifier, transaction.getStartTimestamp());
+                    //delete.addColumn(tx.getLeader().getFamily(), leaderShadowCellQualifier, transaction.getStartTimestamp());
+                    delete.deleteColumn(tx.getLeader().getFamily(), leaderShadowCellQualifier, transaction.getStartTimestamp());
 
                 }
                 try {
