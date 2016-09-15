@@ -136,7 +136,7 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
             // remove LeaderCells
             for (HBaseCellId cell : tx.getWriteSet()) {
                 Delete delete = new Delete(cell.getRow());
-//                delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
+                //delete.addColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
                 delete.deleteColumn(cell.getFamily(), CellUtils.addLeaderCellSuffix(cell.getQualifier()),
                         transaction.getStartTimestamp());
                 if (cell.toString().equals(tx.getLeader().toString()))

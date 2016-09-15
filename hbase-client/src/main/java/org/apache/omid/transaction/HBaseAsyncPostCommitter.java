@@ -70,7 +70,7 @@ public class HBaseAsyncPostCommitter implements PostCommitActions {
         return postCommitExecutor.submit(new Callable<Void>() {
             @Override
             public Void call() throws Exception {
-                syncPostCommitter.removeCommitTableEntry(transaction);
+                syncPostCommitter.removeLeaderCells(transaction);
                 return null;
             }
         });
