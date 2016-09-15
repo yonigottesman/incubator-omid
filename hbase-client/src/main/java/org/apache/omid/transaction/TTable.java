@@ -67,11 +67,11 @@ import java.util.NavigableSet;
  */
 public class TTable implements Closeable {
 
-    private static Logger LOG = LoggerFactory.getLogger(TTable.class);
+    protected static Logger LOG = LoggerFactory.getLogger(TTable.class);
 
     private final HTableInterface healerTable;
 
-    private HTableInterface table;
+    protected HTableInterface table;
 
     // ----------------------------------------------------------------------------------------------------------------
     // Construction
@@ -383,7 +383,7 @@ public class TTable implements Closeable {
         return keyValuesInSnapshot;
     }
 
-    private Map<Long, Long> buildCommitCache(List<Cell> rawCells) {
+    protected Map<Long, Long> buildCommitCache(List<Cell> rawCells) {
 
         Map<Long, Long> commitCache = new HashMap<>();
 
@@ -760,7 +760,7 @@ public class TTable implements Closeable {
     // Helper methods
     // ----------------------------------------------------------------------------------------------------------------
 
-    private void throwExceptionIfOpSetsTimerange(Get getOperation) {
+    protected void throwExceptionIfOpSetsTimerange(Get getOperation) {
         TimeRange tr = getOperation.getTimeRange();
         checkTimerangeIsSetToDefaultValuesOrThrowException(tr);
     }
@@ -777,14 +777,14 @@ public class TTable implements Closeable {
         }
     }
 
-    private void throwExceptionIfOpSetsTimerange(Mutation userOperation) {
+    protected void throwExceptionIfOpSetsTimerange(Mutation userOperation) {
         if (userOperation.getTimeStamp() != HConstants.LATEST_TIMESTAMP) {
             throw new IllegalArgumentException(
                 "Timestamp not allowed in transactional user operations");
         }
     }
 
-    private HBaseTransaction enforceHBaseTransactionAsParam(Transaction tx) {
+    protected HBaseTransaction enforceHBaseTransactionAsParam(Transaction tx) {
         if (tx instanceof HBaseTransaction) {
             return (HBaseTransaction) tx;
         } else {

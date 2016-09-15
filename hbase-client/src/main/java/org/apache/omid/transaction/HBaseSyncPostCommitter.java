@@ -25,6 +25,8 @@ import org.apache.omid.metrics.Timer;
 import org.apache.omid.tso.client.CellId;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.regionserver.TransactionTimestamp;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,10 +65,11 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
             // Add shadow cells
             for (HBaseCellId cell : tx.getWriteSet()) {
-                Put put = new Put(cell.getRow());
+                Put put = new Put(cell.getRow(), transaction.getCommitTimestamp());
                 put.add(cell.getFamily(),
                         CellUtils.addShadowCellSuffix(cell.getQualifier(), 0, cell.getQualifier().length),
-                        tx.getStartTimestamp(),
+//                        tx.getStartTimestamp(),
+                        TransactionTimestamp.TsoTimestampToRegionTimestamp(transaction.getStartTimestamp()),   
                         Bytes.toBytes(tx.getCommitTimestamp()));
                 try {
                     cell.getTable().put(put);

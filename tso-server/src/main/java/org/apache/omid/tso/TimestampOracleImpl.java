@@ -22,6 +22,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.omid.metrics.Gauge;
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.timestamp.storage.TimestampStorage;
+import org.apache.hadoop.hbase.regionserver.TransactionTimestamp;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,8 +81,8 @@ public class TimestampOracleImpl implements TimestampOracle {
 
     }
 
-    static final long TIMESTAMP_BATCH = 10_000_000; // 10 million
-    private static final long TIMESTAMP_REMAINING_THRESHOLD = 1_000_000; // 1 million
+    static final long TIMESTAMP_BATCH = 10_000_000 << TransactionTimestamp.LOCAL_BITS; // 10 million
+    private static final long TIMESTAMP_REMAINING_THRESHOLD = 1_000_000 << TransactionTimestamp.LOCAL_BITS; // 1 million
 
     private long lastTimestamp;
 
@@ -134,7 +135,7 @@ public class TimestampOracleImpl implements TimestampOracle {
     @SuppressWarnings("StatementWithEmptyBody")
     @Override
     public long next() {
-        lastTimestamp++;
+        lastTimestamp += TransactionTimestamp.TRANSACTION_INC;
 
         if (lastTimestamp == nextAllocationThreshold) {
             executor.execute(allocateTimestampsBatchTask);
