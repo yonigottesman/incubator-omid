@@ -64,4 +64,16 @@ public class HBaseAsyncPostCommitter implements PostCommitActions {
         });
     }
 
+    @Override
+    public ListenableFuture<Void> removeLeaderCells(final AbstractTransaction<? extends CellId> transaction) {
+
+        return postCommitExecutor.submit(new Callable<Void>() {
+            @Override
+            public Void call() throws Exception {
+                syncPostCommitter.removeLeaderCells(transaction);
+                return null;
+            }
+        });
+    }
+
 }

@@ -57,7 +57,7 @@ class RequestProcessorImpl implements EventHandler<RequestProcessorImpl.RequestE
     private final CommitHashMap hashmap;
     private final MetricsRegistry metrics;
     private final PersistenceProcessor persistProc;
-
+    private final ReplyProcessor replyProcessor;
     private long lowWatermark = -1L;
 
     @Inject
@@ -65,8 +65,9 @@ class RequestProcessorImpl implements EventHandler<RequestProcessorImpl.RequestE
                          TimestampOracle timestampOracle,
                          PersistenceProcessor persistProc,
                          Panicker panicker,
-                         TSOServerConfig config)
+                         TSOServerConfig config, ReplyProcessor replyProcessor)
             throws IOException {
+
 
         // ------------------------------------------------------------------------------------------------------------
         // Disruptor initialization
@@ -90,7 +91,7 @@ class RequestProcessorImpl implements EventHandler<RequestProcessorImpl.RequestE
         this.persistProc = persistProc;
         this.timestampOracle = timestampOracle;
         this.hashmap = new CommitHashMap(config.getConflictMapSize());
-
+        this.replyProcessor = replyProcessor;
         LOG.info("RequestProcessor initialized");
 
     }
@@ -162,7 +163,8 @@ class RequestProcessorImpl implements EventHandler<RequestProcessorImpl.RequestE
 
         long timestamp = timestampOracle.next();
         requestEvent.getMonCtx().timerStop("request.processor.timestamp.latency");
-        persistProc.addTimestampToBatch(timestamp, requestEvent.getChannel(), requestEvent.getMonCtx());
+        //persistProc.addTimestampToBatch(timestamp, requestEvent.getChannel(), requestEvent.getMonCtx());
+        replyProcessor.sendTimestampResponseLL(timestamp,requestEvent.getChannel());
 
     }
 
@@ -212,15 +214,18 @@ class RequestProcessorImpl implements EventHandler<RequestProcessorImpl.RequestE
                 }
             }
             event.getMonCtx().timerStop("request.processor.commit.latency");
-            persistProc.addCommitToBatch(startTimestamp, commitTimestamp, c, event.getMonCtx());
+            //persistProc.addCommitToBatch(startTimestamp, commitTimestamp, c, event.getMonCtx());
+            replyProcessor.sendCommitResponseLL(startTimestamp,commitTimestamp,event.getChannel());
 
         } else {
 
             event.getMonCtx().timerStop("request.processor.commit.latency");
             if (isCommitRetry) { // Re-check if it was already committed but the client retried due to a lag replying
-                persistProc.addCommitRetryToBatch(startTimestamp, c, event.getMonCtx());
+                replyProcessor.sendAbortResponseLL(startTimestamp,event.getChannel());
+                //persistProc.addCommitRetryToBatch(startTimestamp, c, event.getMonCtx());
             } else {
-                persistProc.addAbortToBatch(startTimestamp, c, event.getMonCtx());
+                replyProcessor.sendAbortResponseLL(startTimestamp,event.getChannel());
+                //persistProc.addAbortToBatch(startTimestamp, c, event.getMonCtx());
             }
 
         }

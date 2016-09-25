@@ -51,6 +51,8 @@ public class TestRequestProcessor {
 
     private PersistenceProcessor persist;
 
+    private ReplyProcessor replyProcessor = null;
+
     private TSOStateManager stateManager;
 
     // Request processor under test
@@ -75,7 +77,7 @@ public class TestRequestProcessor {
         TSOServerConfig config = new TSOServerConfig();
         config.setConflictMapSize(CONFLICT_MAP_SIZE);
 
-        requestProc = new RequestProcessorImpl(metrics, timestampOracle, persist, new MockPanicker(), config);
+        requestProc = new RequestProcessorImpl(metrics, timestampOracle, persist, new MockPanicker(), config, replyProcessor);
 
         // Initialize the state for the experiment
         stateManager.register(requestProc);

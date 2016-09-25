@@ -69,7 +69,9 @@ public class TimestampOracleImpl implements TimestampOracle {
 
         @Override
         public void run() {
+
             long newMaxTimestamp = previousMaxTimestamp + TIMESTAMP_BATCH;
+            System.out.format("##### %d %d %d",10_000_000L << 24,TIMESTAMP_BATCH,newMaxTimestamp);
             try {
                 storage.updateMaxTimestamp(previousMaxTimestamp, newMaxTimestamp);
                 maxAllocatedTimestamp = newMaxTimestamp;
@@ -81,8 +83,8 @@ public class TimestampOracleImpl implements TimestampOracle {
 
     }
 
-    static final long TIMESTAMP_BATCH = 10_000_000 << TransactionTimestamp.LOCAL_BITS; // 10 million
-    private static final long TIMESTAMP_REMAINING_THRESHOLD = 1_000_000 << TransactionTimestamp.LOCAL_BITS; // 1 million
+    static final long TIMESTAMP_BATCH = 10_000_000L << TransactionTimestamp.LOCAL_BITS; // 10 million
+    private static final long TIMESTAMP_REMAINING_THRESHOLD = 1_000_000L << TransactionTimestamp.LOCAL_BITS; // 1 million
 
     private long lastTimestamp;
 

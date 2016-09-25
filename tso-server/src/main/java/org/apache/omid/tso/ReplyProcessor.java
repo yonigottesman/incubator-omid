@@ -67,5 +67,9 @@ interface ReplyProcessor extends Closeable {
 
     void sendTimestampResponse(long startTimestamp, Channel channel);
 
+
+    void sendCommitResponseLL(long startTimestamp, long commitTimestamp, Channel channel);
+    void sendAbortResponseLL(long startTimestamp, Channel channel);
+    void sendTimestampResponseLL(long startTimestamp, Channel channel);
 }
 

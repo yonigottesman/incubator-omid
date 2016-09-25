@@ -92,6 +92,25 @@ public class STable extends TTable {
 
         // create put with correct ts
         final Put tsput = new Put(put.getRow(), startTimestamp);
+
+
+        HBaseCellId leader = transaction.getLeader();
+        if (leader == null)
+        {
+            //Just get first cell in put and use as leader
+            Cell leaderCell = put.getFamilyCellMap().firstEntry().getValue().get(0);
+
+            HBaseCellId leaderCellID = new HBaseCellId(table,
+                    CellUtil.cloneRow(leaderCell),
+                    CellUtil.cloneFamily(leaderCell),
+                    CellUtil.cloneQualifier(leaderCell),
+                    startTimestamp);
+
+            transaction.setLeader(leaderCellID);
+            leader = leaderCellID;
+        }
+
+
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
         for (List<Cell> kvl : kvs.values()) {
             for (Cell c : kvl) {
@@ -103,12 +122,19 @@ public class STable extends TTable {
                 Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), startTimestamp);
                 tsput.add(kv);
 
-                transaction.addWriteSetElement(
-                                               new HBaseCellId(table,
-                                                               CellUtil.cloneRow(kv),
-                                                               CellUtil.cloneFamily(kv),
-                                                               CellUtil.cloneQualifier(kv),
-                                                               startTimestamp));
+                HBaseCellId cellId = new HBaseCellId(table,
+                        CellUtil.cloneRow(kv),
+                        CellUtil.cloneFamily(kv),
+                        CellUtil.cloneQualifier(kv),
+                        kv.getTimestamp());
+
+                transaction.addWriteSetElement(cellId);
+
+                //add the leader cell
+                tsput.add(cellId.getFamily(),
+                        CellUtils.addLeaderCellSuffix(cellId.getQualifier()),
+                        startTimestamp,
+                        Bytes.toBytes(leader.toString()));
             }
         }
         

@@ -19,6 +19,7 @@ package org.apache.omid.transaction;
 
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.HTableInterface;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,19 @@ import java.util.Set;
 
 public class HBaseTransaction extends AbstractTransaction<HBaseCellId> {
     private static final Logger LOG = LoggerFactory.getLogger(HBaseTransaction.class);
+
+    private HBaseCellId leader=null;
+
+    public void setLeader(HBaseCellId c)
+    {
+        if (null == leader) leader = c;
+        else LOG.error("setLeader: Overwriting leader");
+    }
+
+    public HBaseCellId getLeader()
+    {
+        return leader;
+    }
 
     HBaseTransaction(long transactionId, long epoch, Set<HBaseCellId> writeSet, AbstractTransactionManager tm) {
         super(transactionId, epoch, writeSet, tm);
@@ -39,6 +53,10 @@ public class HBaseTransaction extends AbstractTransaction<HBaseCellId> {
         for (final HBaseCellId cell : writeSet) {
             Delete delete = new Delete(cell.getRow());
             delete.deleteColumn(cell.getFamily(), cell.getQualifier(), getStartTimestamp());
+            //add the leader cell
+            delete.deleteColumn(cell.getFamily(),
+                    CellUtils.addLeaderCellSuffix(cell.getQualifier()),
+                    getStartTimestamp());
             try {
                 cell.getTable().delete(delete);
             } catch (IOException e) {
@@ -46,6 +64,12 @@ public class HBaseTransaction extends AbstractTransaction<HBaseCellId> {
             }
         }
         try {
+            Delete deleteInvalidation = new Delete(leader.getRow());
+            byte[] leaderInvalidatedQualifier = CellUtils.addInvalidationCellSuffix(Bytes.add(leader.getQualifier(),
+                    Bytes.toBytes("__"+String.valueOf(leader.getTimestamp()))));
+
+            deleteInvalidation.deleteColumn(leader.getFamily(),leaderInvalidatedQualifier);
+            leader.getTable().delete(deleteInvalidation);
             flushTables();
         } catch (IOException e) {
             LOG.warn("Failed flushing tables for Tx {}", getTransactionId(), e);
