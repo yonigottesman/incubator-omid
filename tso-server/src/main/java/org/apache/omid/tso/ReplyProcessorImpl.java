@@ -116,11 +116,11 @@ class ReplyProcessorImpl implements EventHandler<ReplyProcessorImpl.ReplyBatchEv
                 break;
             case ABORT:
                 sendAbortResponse(replyBatchEvent.getStartTimestamp(), replyBatchEvent.getChannel());
-                commitMeter.mark();
+                abortMeter.mark();
                 break;
             case TIMESTAMP:
                 sendTimestampResponse(replyBatchEvent.getStartTimestamp(), replyBatchEvent.getChannel());
-                commitMeter.mark();
+                timestampMeter.mark();
                 break;
         }
 
