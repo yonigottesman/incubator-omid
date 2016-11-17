@@ -69,9 +69,7 @@ public class TimestampOracleImpl implements TimestampOracle {
 
         @Override
         public void run() {
-
             long newMaxTimestamp = previousMaxTimestamp + TIMESTAMP_BATCH;
-            System.out.format("##### %d %d %d",10_000_000L << 24,TIMESTAMP_BATCH,newMaxTimestamp);
             try {
                 storage.updateMaxTimestamp(previousMaxTimestamp, newMaxTimestamp);
                 maxAllocatedTimestamp = newMaxTimestamp;
