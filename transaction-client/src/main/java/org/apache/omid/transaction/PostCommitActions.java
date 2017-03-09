@@ -38,4 +38,6 @@ public interface PostCommitActions {
      */
     ListenableFuture<Void> removeCommitTableEntry(AbstractTransaction<? extends CellId> transaction);
 
+    ListenableFuture<Void> removeLeaderCells(AbstractTransaction<? extends CellId> transaction);
+
 }

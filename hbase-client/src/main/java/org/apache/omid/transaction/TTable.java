@@ -148,6 +148,7 @@ public class TTable implements Closeable {
                 for (byte[] qualifier : qualifiers) {
                     tsget.addColumn(family, qualifier);
                     tsget.addColumn(family, CellUtils.addShadowCellSuffix(qualifier));
+                    tsget.addColumn(family, CellUtils.addLeaderCellSuffix(qualifier));
                 }
             }
         }
@@ -268,6 +269,23 @@ public class TTable implements Closeable {
         final long startTimestamp = transaction.getStartTimestamp();
         // create put with correct ts
         final Put tsput = new Put(put.getRow(), startTimestamp);
+
+        HBaseCellId leader = transaction.getLeader();
+        if (leader == null)
+        {
+            //Just get first cell in put and use as leader
+            Cell leaderCell = put.getFamilyCellMap().firstEntry().getValue().get(0);
+
+            HBaseCellId leaderCellID = new HBaseCellId(table,
+                    CellUtil.cloneRow(leaderCell),
+                    CellUtil.cloneFamily(leaderCell),
+                    CellUtil.cloneQualifier(leaderCell),
+                    startTimestamp);
+
+            transaction.setLeader(leaderCellID);
+            leader = leaderCellID;
+        }
+
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
         for (List<Cell> kvl : kvs.values()) {
             for (Cell c : kvl) {
@@ -279,12 +297,19 @@ public class TTable implements Closeable {
                 Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), startTimestamp);
                 tsput.add(kv);
 
-                transaction.addWriteSetElement(
-                    new HBaseCellId(table,
-                                    CellUtil.cloneRow(kv),
-                                    CellUtil.cloneFamily(kv),
-                                    CellUtil.cloneQualifier(kv),
-                                    kv.getTimestamp()));
+                HBaseCellId cellId = new HBaseCellId(table,
+                        CellUtil.cloneRow(kv),
+                        CellUtil.cloneFamily(kv),
+                        CellUtil.cloneQualifier(kv),
+                        kv.getTimestamp());
+
+                transaction.addWriteSetElement(cellId);
+
+                //add the leader cell
+                tsput.add(cellId.getFamily(),
+                        CellUtils.addLeaderCellSuffix(cellId.getQualifier()),
+                        startTimestamp,
+                        Bytes.toBytes(leader.toString()));
             }
         }
 
@@ -346,12 +371,13 @@ public class TTable implements Closeable {
         }
 
         Map<Long, Long> commitCache = buildCommitCache(rawCells);
+        Map<Long, String> leaderMap = buildLeaderMap(rawCells);
 
         for (Collection<Cell> columnCells : groupCellsByColumnFilteringShadowCells(rawCells)) {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
-                if (isCellInSnapshot(cell, transaction, commitCache)) {
+                if (isCellInSnapshot(cell, transaction, commitCache,leaderMap)) {
                     if (!CellUtil.matchingValue(cell, CellUtils.DELETE_TOMBSTONE)) {
                         keyValuesInSnapshot.add(cell);
                     }
@@ -383,6 +409,19 @@ public class TTable implements Closeable {
         return keyValuesInSnapshot;
     }
 
+    private Map<Long, String> buildLeaderMap(List<Cell> rawCells) {
+
+        Map<Long, String> leaderMap = new HashMap<>();
+
+        for (Cell cell : rawCells) {
+            if (CellUtils.isLeaderCell(cell)) {
+                leaderMap.put(cell.getTimestamp(), Bytes.toString(CellUtil.cloneValue(cell)));
+            }
+        }
+
+        return leaderMap;
+    }
+
     private Map<Long, Long> buildCommitCache(List<Cell> rawCells) {
 
         Map<Long, Long> commitCache = new HashMap<>();
@@ -396,7 +435,8 @@ public class TTable implements Closeable {
         return commitCache;
     }
 
-    private boolean isCellInSnapshot(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache)
+    private boolean isCellInSnapshot(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache,
+                                     Map<Long, String> leaderMap)
         throws IOException {
 
         long startTimestamp = transaction.getStartTimestamp();
@@ -407,7 +447,7 @@ public class TTable implements Closeable {
 
         Optional<Long> commitTimestamp =
             tryToLocateCellCommitTimestamp(transaction.getTransactionManager(), transaction.getEpoch(), kv,
-                                           commitCache);
+                                           commitCache, leaderMap);
 
         return commitTimestamp.isPresent() && commitTimestamp.get() < startTimestamp;
     }
@@ -419,6 +459,10 @@ public class TTable implements Closeable {
         pendingGet.addColumn(CellUtil.cloneFamily(cell), CellUtils.addShadowCellSuffix(cell.getQualifierArray(),
                                                                                        cell.getQualifierOffset(),
                                                                                        cell.getQualifierLength()));
+        pendingGet.addColumn(CellUtil.cloneFamily(cell), CellUtils.addLeaderCellSuffix(cell.getQualifierArray(),
+                cell.getQualifierOffset(),
+                cell.getQualifierLength()));
+
         pendingGet.setMaxVersions(versionCount);
         pendingGet.setTimeRange(0, cell.getTimestamp());
 
@@ -428,7 +472,8 @@ public class TTable implements Closeable {
     private Optional<Long> tryToLocateCellCommitTimestamp(AbstractTransactionManager transactionManager,
                                                           long epoch,
                                                           Cell cell,
-                                                          Map<Long, Long> commitCache)
+                                                          Map<Long, Long> commitCache,
+                                                          Map<Long, String> leaderMap)
         throws IOException {
 
         CommitTimestamp tentativeCommitTimestamp =
@@ -441,7 +486,7 @@ public class TTable implements Closeable {
                                     CellUtil.cloneFamily(cell),
                                     CellUtil.cloneQualifier(cell),
                                     cell.getTimestamp()),
-                    commitCache));
+                    commitCache,leaderMap));
 
         // If transaction that added the cell was invalidated
         if (!tentativeCommitTimestamp.isValid()) {
@@ -455,6 +500,9 @@ public class TTable implements Closeable {
                 // commit phase of the client probably failed, so we heal the shadow
                 // cell with the right commit timestamp for avoiding further reads to
                 // hit the storage
+                healShadowCell(cell, tentativeCommitTimestamp.getValue());
+                return Optional.of(tentativeCommitTimestamp.getValue());
+            case LEADER:
                 healShadowCell(cell, tentativeCommitTimestamp.getValue());
                 return Optional.of(tentativeCommitTimestamp.getValue());
             case CACHE:
@@ -800,7 +848,8 @@ public class TTable implements Closeable {
 
             @Override
             public boolean apply(Cell cell) {
-                return cell != null && !CellUtils.isShadowCell(cell);
+                return cell != null && !CellUtils.isShadowCell(cell) && !CellUtils.isLeaderCell(cell) &&
+                        !CellUtils.isInvalidationCell(cell);
             }
 
         };

@@ -108,35 +108,52 @@ class ReplyProcessorImpl implements EventHandler<ReplyProcessorImpl.ReplyBatchEv
     @VisibleForTesting
     void handleReplyBatchEvent(ReplyBatchEvent replyBatchEvent) throws Exception {
 
-        Batch batch = replyBatchEvent.getBatch();
-        for (int i = 0; i < batch.getNumEvents(); i++) {
-            PersistEvent event = batch.get(i);
-
-            switch (event.getType()) {
-                case COMMIT:
-                    sendCommitResponse(event.getStartTimestamp(), event.getCommitTimestamp(), event.getChannel());
-                    event.getMonCtx().timerStop("reply.processor.commit.latency");
-                    commitMeter.mark();
-                    break;
-                case ABORT:
-                    sendAbortResponse(event.getStartTimestamp(), event.getChannel());
-                    event.getMonCtx().timerStop("reply.processor.abort.latency");
-                    abortMeter.mark();
-                    break;
-                case TIMESTAMP:
-                    sendTimestampResponse(event.getStartTimestamp(), event.getChannel());
-                    event.getMonCtx().timerStop("reply.processor.timestamp.latency");
-                    timestampMeter.mark();
-                    break;
-                case COMMIT_RETRY:
-                    throw new IllegalStateException("COMMIT_RETRY events must be filtered before this step: " + event);
-                default:
-                    throw new IllegalStateException("Event not allowed in Persistent Processor Handler: " + event);
-            }
-            event.getMonCtx().publish();
+        switch (replyBatchEvent.getType()) {
+            case COMMIT:
+                sendCommitResponse(replyBatchEvent.getStartTimestamp(), replyBatchEvent.getCommitTimestamp(),
+                        replyBatchEvent.getChannel());
+                commitMeter.mark();
+                break;
+            case ABORT:
+                sendAbortResponse(replyBatchEvent.getStartTimestamp(), replyBatchEvent.getChannel());
+                abortMeter.mark();
+                break;
+            case TIMESTAMP:
+                sendTimestampResponse(replyBatchEvent.getStartTimestamp(), replyBatchEvent.getChannel());
+                timestampMeter.mark();
+                break;
         }
 
-        batchPool.returnObject(batch);
+
+//        Batch batch = replyBatchEvent.getBatch();
+//        for (int i = 0; i < batch.getNumEvents(); i++) {
+//            PersistEvent event = batch.get(i);
+//
+//            switch (event.getType()) {
+//                case COMMIT:
+//                    sendCommitResponse(event.getStartTimestamp(), event.getCommitTimestamp(), event.getChannel());
+//                    event.getMonCtx().timerStop("reply.processor.commit.latency");
+//                    commitMeter.mark();
+//                    break;
+//                case ABORT:
+//                    sendAbortResponse(event.getStartTimestamp(), event.getChannel());
+//                    event.getMonCtx().timerStop("reply.processor.abort.latency");
+//                    abortMeter.mark();
+//                    break;
+//                case TIMESTAMP:
+//                    sendTimestampResponse(event.getStartTimestamp(), event.getChannel());
+//                    event.getMonCtx().timerStop("reply.processor.timestamp.latency");
+//                    timestampMeter.mark();
+//                    break;
+//                case COMMIT_RETRY:
+//                    throw new IllegalStateException("COMMIT_RETRY events must be filtered before this step: " + event);
+//                default:
+//                    throw new IllegalStateException("Event not allowed in Persistent Processor Handler: " + event);
+//            }
+//            event.getMonCtx().publish();
+//        }
+//
+//        batchPool.returnObject(batch);
 
     }
 
@@ -218,6 +235,30 @@ class ReplyProcessorImpl implements EventHandler<ReplyProcessorImpl.ReplyBatchEv
     }
 
     @Override
+    public void sendCommitResponseLL(long startTimestamp, long commitTimestamp, Channel channel) {
+        long seq = replyRing.next();
+        ReplyBatchEvent e = replyRing.get(seq);
+        ReplyBatchEvent.makeCommitResponse(e, startTimestamp, commitTimestamp,channel);
+        replyRing.publish(seq);
+    }
+
+    @Override
+    public void sendAbortResponseLL(long startTimestamp, Channel channel) {
+        long seq = replyRing.next();
+        ReplyBatchEvent e = replyRing.get(seq);
+        ReplyBatchEvent.makeAbortResponse(e, startTimestamp, channel);
+        replyRing.publish(seq);
+    }
+
+    @Override
+    public void sendTimestampResponseLL(long startTimestamp, Channel channel) {
+        long seq = replyRing.next();
+        ReplyBatchEvent e = replyRing.get(seq);
+        ReplyBatchEvent.makeTimestampReponse(e, startTimestamp, channel);
+        replyRing.publish(seq);
+    }
+
+    @Override
     public void close() {
 
         LOG.info("Terminating Reply Processor...");
@@ -237,6 +278,40 @@ class ReplyProcessorImpl implements EventHandler<ReplyProcessorImpl.ReplyBatchEv
     }
 
     final static class ReplyBatchEvent {
+        //LL start
+        enum Type {
+            TIMESTAMP, COMMIT, ABORT
+        }
+        private Type type = null;
+        private Channel channel = null;
+
+        private long startTimestamp = 0;
+        private long commitTimestamp = 0;
+
+        Type getType() { return type; }
+        Channel getChannel() { return channel; }
+        long getStartTimestamp() { return startTimestamp; }
+        long getCommitTimestamp() { return commitTimestamp; }
+
+        static void makeTimestampReponse(ReplyBatchEvent e, long startTimestamp, Channel c) {
+            e.type = Type.TIMESTAMP;
+            e.startTimestamp = startTimestamp;
+            e.channel = c;
+        }
+
+        static void makeCommitResponse(ReplyBatchEvent e, long startTimestamp, long commitTimestamp, Channel c) {
+            e.type = Type.COMMIT;
+            e.startTimestamp = startTimestamp;
+            e.commitTimestamp = commitTimestamp;
+            e.channel = c;
+        }
+
+        static void makeAbortResponse(ReplyBatchEvent e, long startTimestamp, Channel c) {
+            e.type = Type.ABORT;
+            e.startTimestamp = startTimestamp;
+            e.channel = c;
+        }
+        //LL end
 
         private Batch batch;
         private long batchSequence;

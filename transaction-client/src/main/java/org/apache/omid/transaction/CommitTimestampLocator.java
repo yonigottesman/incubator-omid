@@ -34,4 +34,6 @@ public interface CommitTimestampLocator {
 
     Optional<Long> readCommitTimestampFromShadowCell(long startTimestamp) throws IOException;
 
+    Optional<Long> readCommitTimestampFromLeader(long startTimestamp) throws IOException;
+
 }

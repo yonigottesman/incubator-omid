@@ -78,7 +78,7 @@ public interface CommitTable {
     class CommitTimestamp {
 
         public enum Location {
-            NOT_PRESENT, CACHE, COMMIT_TABLE, SHADOW_CELL
+            NOT_PRESENT, CACHE, COMMIT_TABLE, SHADOW_CELL, LEADER
         }
 
         private final Location location;

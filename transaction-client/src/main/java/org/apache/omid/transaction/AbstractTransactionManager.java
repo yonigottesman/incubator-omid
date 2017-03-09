@@ -41,6 +41,7 @@ import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.C
 import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.COMMIT_TABLE;
 import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.NOT_PRESENT;
 import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.SHADOW_CELL;
+import static org.apache.omid.committable.CommitTable.CommitTimestamp.Location.LEADER;
 import static org.apache.omid.metrics.MetricsUtils.name;
 
 /**
@@ -175,6 +176,8 @@ public abstract class AbstractTransactionManager implements TransactionManager {
      */
     public void preCommit(AbstractTransaction<? extends CellId> transaction) throws TransactionManagerException {}
 
+    public boolean commitLeader(AbstractTransaction<? extends CellId> transaction,long commitTs) { return false;}
+
     /**
      * @see org.apache.omid.transaction.TransactionManager#commit(Transaction)
      */
@@ -198,7 +201,7 @@ public abstract class AbstractTransactionManager implements TransactionManager {
                 if (tx.getWriteSet().isEmpty()) {
                     markReadOnlyTransaction(tx); // No need for read-only transactions to contact the TSO Server
                 } else {
-                    commitRegularTransaction(tx);
+                    commitRegularLLTransaction(tx);
                 }
                 committedTxsCounter.inc();
             } finally {
@@ -286,6 +289,29 @@ public abstract class AbstractTransactionManager implements TransactionManager {
     }
 
     /**
+     * Check if the transaction commit data is at the leader
+     * @param cellStartTimestamp
+     *            the transaction start timestamp
+     *        locator
+     *            the timestamp locator
+     * @throws IOException
+     */
+    Optional<CommitTimestamp> readCommitTimestampFromLeader(long cellStartTimestamp, CommitTimestampLocator locator)
+            throws IOException
+    {
+
+        Optional<CommitTimestamp> commitTS = Optional.absent();
+
+        Optional<Long> commitTimestamp = locator.readCommitTimestampFromLeader(cellStartTimestamp);
+        if (commitTimestamp.isPresent()) {
+            commitTS = Optional.of(new CommitTimestamp(LEADER, commitTimestamp.get(), true)); // Valid commit TS
+        }
+
+        return commitTS;
+    }
+
+
+    /**
      * This function returns the commit timestamp for a particular cell if the transaction was already committed in
      * the system. In case the transaction was not committed and the cell was written by transaction initialized by a
      * previous TSO server, an invalidation try occurs.
@@ -310,48 +336,50 @@ public abstract class AbstractTransactionManager implements TransactionManager {
                 return new CommitTimestamp(CACHE, commitTimestamp.get(), true);
             }
 
-            // 2) Then check the commit table
-            // If the data was written at a previous epoch, check whether the transaction was invalidated
-            Optional<CommitTimestamp> commitTimeStamp = commitTableClient.getCommitTimestamp(cellStartTimestamp).get();
+            //2) check leader
+            Optional<CommitTimestamp> commitTimeStamp = readCommitTimestampFromLeader(cellStartTimestamp, locator);
             if (commitTimeStamp.isPresent()) {
                 return commitTimeStamp.get();
             }
 
-            // 3) Read from shadow cell
-            commitTimeStamp = readCommitTimestampFromShadowCell(cellStartTimestamp, locator);
-            if (commitTimeStamp.isPresent()) {
-                return commitTimeStamp.get();
-            }
-
-            // 4) Check the epoch and invalidate the entry
-            // if the data was written by a transaction from a previous epoch (previous TSO)
-            if (cellStartTimestamp < epoch) {
-                boolean invalidated = commitTableClient.tryInvalidateTransaction(cellStartTimestamp).get();
-                if (invalidated) { // Invalid commit timestamp
-                    return new CommitTimestamp(COMMIT_TABLE, CommitTable.INVALID_TRANSACTION_MARKER, false);
-                }
-            }
-
-            // 5) We did not manage to invalidate the transactions then check the commit table
-            commitTimeStamp = commitTableClient.getCommitTimestamp(cellStartTimestamp).get();
-            if (commitTimeStamp.isPresent()) {
-                return commitTimeStamp.get();
-            }
-
-            // 6) Read from shadow cell
-            commitTimeStamp = readCommitTimestampFromShadowCell(cellStartTimestamp, locator);
-            if (commitTimeStamp.isPresent()) {
-                return commitTimeStamp.get();
-            }
+//            // 3) Read from shadow cell
+//            commitTimeStamp = readCommitTimestampFromShadowCell(cellStartTimestamp, locator);
+//            if (commitTimeStamp.isPresent()) {
+//                return commitTimeStamp.get();
+//            }
+//
+//            // 4) Check the epoch and invalidate the entry
+//            // if the data was written by a transaction from a previous epoch (previous TSO)
+//            if (cellStartTimestamp < epoch) {
+//                boolean invalidated = commitTableClient.tryInvalidateTransaction(cellStartTimestamp).get();
+//                if (invalidated) { // Invalid commit timestamp
+//                    return new CommitTimestamp(COMMIT_TABLE, CommitTable.INVALID_TRANSACTION_MARKER, false);
+//                }
+//            }
+//
+//            // 5) We did not manage to invalidate the transactions then check the commit table
+//            commitTimeStamp = commitTableClient.getCommitTimestamp(cellStartTimestamp).get();
+//            if (commitTimeStamp.isPresent()) {
+//                return commitTimeStamp.get();
+//            }
+//
+//            // 6) Read from shadow cell
+//            commitTimeStamp = readCommitTimestampFromShadowCell(cellStartTimestamp, locator);
+//            if (commitTimeStamp.isPresent()) {
+//                return commitTimeStamp.get();
+//            }
 
             // *) Otherwise return not found
             return new CommitTimestamp(NOT_PRESENT, -1L /** TODO Check if we should return this */, true);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while finding commit timestamp", e);
-        } catch (ExecutionException e) {
+        }catch (IOException e) {
             throw new IOException("Problem finding commit timestamp", e);
         }
+//        } catch (InterruptedException e) {
+//            Thread.currentThread().interrupt();
+//            throw new IOException("Interrupted while finding commit timestamp", e);
+//        } catch (ExecutionException e) {
+//            throw new IOException("Problem finding commit timestamp", e);
+//        }
 
     }
 
@@ -394,6 +422,41 @@ public abstract class AbstractTransactionManager implements TransactionManager {
     private void markReadOnlyTransaction(AbstractTransaction<? extends CellId> readOnlyTx) {
 
         readOnlyTx.setStatus(Status.COMMITTED_RO);
+
+    }
+
+    private void commitRegularLLTransaction(AbstractTransaction<? extends CellId> tx)
+            throws RollbackException, TransactionException
+    {
+        try {
+            long commitTs = tsoClient.commit(tx.getStartTimestamp(), tx.getWriteSet()).get();
+
+            boolean result = commitLeader(tx, commitTs);
+            if (result == false) {
+                //leader was invalidated.
+                rollback(tx);
+                rolledbackTxsCounter.inc();
+                throw new RollbackException("Leader got invalidated");
+            }
+
+            certifyCommitForTx(tx, commitTs);
+            updateShadowCellsAndRemoveCommitTableEntry(tx, postCommitter);
+
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof AbortException) { // TSO reports Tx conflicts as AbortExceptions in the future
+                rollback(tx);
+                rolledbackTxsCounter.inc();
+                throw new RollbackException("Conflicts detected in tx writeset", e.getCause());
+            }
+
+            LOG.error("{}: Can't determine Transaction outcome", tx);
+            throw new TransactionException(tx + ": cannot determine Tx outcome");
+
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new TransactionException(tx + ": interrupted during commit", ie);
+
+        }
 
     }
 
@@ -479,7 +542,7 @@ public abstract class AbstractTransactionManager implements TransactionManager {
         Futures.transform(postCommitter.updateShadowCells(tx), new Function<Void, Void>() {
             @Override
             public Void apply(Void aVoid) {
-                postCommitter.removeCommitTableEntry(tx);
+                postCommitter.removeLeaderCells(tx);
                 return null;
             }
         });
