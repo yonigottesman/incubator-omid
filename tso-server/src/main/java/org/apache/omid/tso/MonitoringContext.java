@@ -46,31 +46,31 @@ public class MonitoringContext {
     }
 
     public void timerStart(String name) {
-        Stopwatch stopwatch = new Stopwatch();
-        stopwatch.start();
-        timers.put(name, stopwatch);
+//        Stopwatch stopwatch = new Stopwatch();
+//        stopwatch.start();
+//        timers.put(name, stopwatch);
     }
 
     public void timerStop(String name) {
-        if (flag) {
-            LOG.warn("timerStop({}) called after publish. Measurement was ignored. {}", name, Throwables.getStackTraceAsString(new Exception()));
-            return;
-        }
-        Stopwatch activeStopwatch = timers.get(name);
-        if (activeStopwatch == null) {
-            throw new IllegalStateException(
-                    String.format("There is no %s timer in the %s monitoring context.", name, this));
-        }
-        activeStopwatch.stop();
-        elapsedTimeMsMap.put(name, activeStopwatch.elapsedTime(TimeUnit.NANOSECONDS));
-        timers.remove(name);
+//        if (flag) {
+//            LOG.warn("timerStop({}) called after publish. Measurement was ignored. {}", name, Throwables.getStackTraceAsString(new Exception()));
+//            return;
+//        }
+//        Stopwatch activeStopwatch = timers.get(name);
+//        if (activeStopwatch == null) {
+//            throw new IllegalStateException(
+//                    String.format("There is no %s timer in the %s monitoring context.", name, this));
+//        }
+//        activeStopwatch.stop();
+//        elapsedTimeMsMap.put(name, activeStopwatch.elapsedTime(TimeUnit.NANOSECONDS));
+//        timers.remove(name);
     }
 
     public void publish() {
-        flag = true;
-        for (Map.Entry<String, Long> entry : elapsedTimeMsMap.entrySet()) {
-            metrics.timer(name("tso", entry.getKey())).update(entry.getValue());
-        }
+//        flag = true;
+//        for (Map.Entry<String, Long> entry : elapsedTimeMsMap.entrySet()) {
+//            metrics.timer(name("tso", entry.getKey())).update(entry.getValue());
+//        }
     }
 
 }

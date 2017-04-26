@@ -333,8 +333,14 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
 
         @Override
         public Optional<Long> readCommitTimestampFromLeader(long startTimestamp) throws IOException {
-
+            /**
+             * Bug if run regular omid before omidLL. no leader and no SC
+             */
             String leader = leaderMap.get(startTimestamp);
+            if (leader == null)
+            {
+                System.out.format("%d %s %s\n",startTimestamp,Bytes.toString(hBaseCellId.getRow()),Bytes.toString(hBaseCellId.getQualifier()));
+            }
             String[] leaderParts = leader.split(":");
             byte[] leaderTable = Bytes.toBytes(leaderParts[0]);
             byte[] leaderRow = Bytes.toBytes(leaderParts[1]);

@@ -40,7 +40,6 @@ public class HBaseAsyncPostCommitter implements PostCommitActions {
 
     @Override
     public ListenableFuture<Void> updateShadowCells(final AbstractTransaction<? extends CellId> transaction) {
-
         return postCommitExecutor.submit(new Callable<Void>() {
             @Override
             public Void call() throws Exception {
@@ -54,7 +53,6 @@ public class HBaseAsyncPostCommitter implements PostCommitActions {
 
     @Override
     public ListenableFuture<Void> removeCommitTableEntry(final AbstractTransaction<? extends CellId> transaction) {
-
         return postCommitExecutor.submit(new Callable<Void>() {
             @Override
             public Void call() throws Exception {

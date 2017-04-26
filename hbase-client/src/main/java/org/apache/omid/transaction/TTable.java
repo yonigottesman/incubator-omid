@@ -849,7 +849,9 @@ public class TTable implements Closeable {
             @Override
             public boolean apply(Cell cell) {
                 return cell != null && !CellUtils.isShadowCell(cell) && !CellUtils.isLeaderCell(cell) &&
-                        !CellUtils.isInvalidationCell(cell);
+                        !CellUtils.isInvalidationCell(cell) && (Bytes.compareTo(cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),
+                        Bytes.toBytes("GET_LOCAL_COUNTER"), 0,17) != 0);
+
             }
 
         };

@@ -200,6 +200,8 @@ public abstract class AbstractTransactionManager implements TransactionManager {
             try {
                 if (tx.getWriteSet().isEmpty()) {
                     markReadOnlyTransaction(tx); // No need for read-only transactions to contact the TSO Server
+                    //Must contact TSO to check if watermark is lower then start timestamp
+                    commitRegularLLTransaction(tx);
                 } else {
                     commitRegularLLTransaction(tx);
                 }
@@ -431,6 +433,9 @@ public abstract class AbstractTransactionManager implements TransactionManager {
         try {
             long commitTs = tsoClient.commit(tx.getStartTimestamp(), tx.getWriteSet()).get();
 
+            if (tx.getWriteSet().isEmpty()) {
+                return;
+            }
             boolean result = commitLeader(tx, commitTs);
             if (result == false) {
                 //leader was invalidated.

@@ -20,6 +20,8 @@ package org.apache.omid.transaction;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import org.apache.hadoop.hbase.client.Delete;
+import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.omid.committable.CommitTable;
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.metrics.Timer;
@@ -46,6 +48,8 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
     private final Timer commitTableUpdateTimer;
     private final Timer shadowCellsUpdateTimer;
     private final Timer leaderCellsDeleteTimer;
+
+    HTableInterface tableCopy=null;
 
     public HBaseSyncPostCommitter(MetricsRegistry metrics, CommitTable.Client commitTableClient) {
         this.metrics = metrics;
@@ -75,7 +79,13 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
                         TransactionTimestamp.TsoTimestampToRegionTimestamp(transaction.getStartTimestamp()),
                         Bytes.toBytes(tx.getCommitTimestamp()));
                 try {
-                    cell.getTable().put(put);
+                    if (tableCopy == null) {
+                        System.out.format("CREATE TABLE %s",Thread.currentThread().getName());
+                        tableCopy = ((HTable)cell.getTable()).getConnection().getTable(cell.getTable().getName());
+                        tableCopy.setAutoFlushTo(false);
+                    }
+                    tableCopy.put(put);
+                    //cell.getTable().put(put);
                 } catch (IOException e) {
                     LOG.warn("{}: Error inserting shadow cell {}", tx, cell, e);
                     updateSCFuture.setException(
@@ -85,7 +95,8 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
             // Flush affected tables before returning to avoid loss of shadow cells updates when autoflush is disabled
             try {
-                tx.flushTables();
+                tableCopy.flushCommits();
+                //tx.flushTables();
                 updateSCFuture.set(null);
             } catch (IOException e) {
                 LOG.warn("{}: Error while flushing writes", tx, e);
@@ -153,7 +164,13 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
 
                 }
                 try {
-                    cell.getTable().delete(delete);
+                    if (tableCopy == null) {
+                        System.out.format("2CREATE TABLE %s",Thread.currentThread().getName());
+                        tableCopy = ((HTable)cell.getTable()).getConnection().getTable(cell.getTable().getName());
+                        tableCopy.setAutoFlushTo(false);
+                    }
+                    tableCopy.delete(delete);
+                    //cell.getTable().delete(delete);
 
                 } catch (IOException e) {
                     LOG.warn("{}: Error deleting leader cell of {}", tx, cell, e);
@@ -162,7 +179,8 @@ public class HBaseSyncPostCommitter implements PostCommitActions {
                 }
             }
             try {
-                tx.flushTables();
+                //tx.flushTables();
+                tableCopy.flushCommits();
                 removeLeaderFuture.set(null);
             } catch (IOException e) {
                 LOG.warn("{}: Error deleting leader cell of", tx, e);

@@ -89,10 +89,8 @@ public class STable extends TTable {
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
         final long startTimestamp = transaction.getStartTimestamp();
-
         // create put with correct ts
         final Put tsput = new Put(put.getRow(), startTimestamp);
-
 
         HBaseCellId leader = transaction.getLeader();
         if (leader == null)
@@ -109,7 +107,6 @@ public class STable extends TTable {
             transaction.setLeader(leaderCellID);
             leader = leaderCellID;
         }
-
 
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
         for (List<Cell> kvl : kvs.values()) {
@@ -166,7 +163,7 @@ public class STable extends TTable {
 
         throwExceptionIfOpSetsTimerange(get);
         throwExceptionIfMultiGet(get);
-        
+
         final Get tsget = new Get(get.getRow()).setFilter(get.getFilter());
         TimeRange timeRange = get.getTimeRange();
         long startTime = timeRange.getMin(); // should return 0L
@@ -186,23 +183,45 @@ public class STable extends TTable {
             }
         }
         LOG.trace("Initial Get = {}", tsget);
-
+        tsget.addFamily(Bytes.toBytes("GET_LOCAL_COUNTER"));
         // Return the KVs that belong to the transaction snapshot, ask for more
         // versions if needed
         Result result = table.get(tsget);
         List<Cell> filteredKeyValues = new ArrayList<Cell>();
         Long latestTS = new Long(Long.MAX_VALUE);
+
+        /*
+        * Must fix this!
+        * If Hbase removes early versions of a cell that doesnt have a SC but has a __TS__ SC
+        * */
+//        if (!result.isEmpty() && !filterCellsForSingletonSnapshot(result.listCells(), filteredKeyValues, latestTS)) {
+//            //System.out.println("Error read");
+//        }
+//
+//        return Result.create(filteredKeyValues);
+
+
+
+
         while (!result.isEmpty() && !filterCellsForSingletonSnapshot(result.listCells(), filteredKeyValues, latestTS)) {
-        	if (tsget.getMaxVersions() > 256) // limit the number of gets
+            if (tsget.getMaxVersions() > 256) // limit the number of gets
         		tsget.setMaxVersions(); // just get all versions
         	else
         		tsget.setMaxVersions(tsget.getMaxVersions() * 2); // double number of versions
         	tsget.setTimeRange(startTime, latestTS);
         	result = table.get(tsget);
+            System.out.format("ERROR %s \n",Bytes.toString(tsget.getRow()));
+        }
+
+        for (Cell cell :result.listCells()) {
+            //find the local clock
+            if (Bytes.compareTo(cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength(),Bytes.toBytes("GET_LOCAL_COUNTER"), 0,17) == 0) {
+                filteredKeyValues.add(cell);
+            }
         }
 
         return Result.create(filteredKeyValues);
-        
+
     } 
 
     /**
@@ -217,9 +236,8 @@ public class STable extends TTable {
      */
     private boolean filterCellsForSingletonSnapshot(List<Cell> rawCells,
 			List<Cell> filteredKeyValues, Long latestTS) {
-		
-    	assert (rawCells != null && filteredKeyValues != null);
 
+    	assert (rawCells != null && filteredKeyValues != null);
         List<Cell> keyValuesInSnapshot = new ArrayList<>();
         //List<Get> pendingGetsList = new ArrayList<>();
         
@@ -230,7 +248,8 @@ public class STable extends TTable {
         for (Collection<Cell> columnCells : cellsByColumnFilteringShadowCells) {
             boolean snapshotValueFound = false;
             for (Cell cell : columnCells) {
-            	if (isCellTentative(cell,commitCache)) {
+                //System.out.format("YONI cell %s YONI\n",Bytes.toString(cell.getQualifierArray()));
+                if (isCellTentative(cell,commitCache)) {
             		latestTS = cell.getTimestamp();
             		return false; // should issue another get with the updated timeRange
             	} else if (commitCache.get(cell.getTimestamp()) < latestTS) {
@@ -356,6 +375,7 @@ public class STable extends TTable {
     }
 
     /**
+     * BWC
      * Transactional version of {@link HTableInterface#put(Put put)} for Singeltons
      * @throws AbortException if the put has to be aborted due to ongoing transactions
      */
@@ -375,7 +395,7 @@ public class STable extends TTable {
                 // It's not nice to reach into keyvalue internals,
                 // but we want to avoid having to copy the whole thing
                 KeyValue kv = KeyValueUtil.ensureKeyValue(c);
-                //Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), startTimestamp);
+                //Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), 1234);
                 tsput.add(kv);
                 // Add the shadow cell 
                 tsput.add(CellUtil.cloneFamily(c), 
@@ -394,7 +414,51 @@ public class STable extends TTable {
         	throw new AbortException();
     }
 
-	private boolean isCellSingleton(Cell cell) {
+    /**
+     * WC
+     * Transactional version of {@link HTableInterface#put(Put put)} for Singeltons
+     * @throws AbortException if the put has to be aborted due to ongoing transactions
+     */
+    public void singletonPutCommit(Put put,long bts) throws IOException, AbortException {
+
+        throwExceptionIfOpSetsTimerange(put);
+
+        throwExceptionIfMultiPut(put);
+
+        // create put with correct ts
+        final Put tsput = new Put(put.getRow(), TransactionTimestamp.SINGLETON_TIMESTAMP);
+        Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
+        for (List<Cell> kvl : kvs.values()) {
+            for (Cell c : kvl) {
+                CellUtils.validateCell(c, TransactionTimestamp.SINGLETON_TIMESTAMP);
+                // Reach into keyvalue to update timestamp.
+                // It's not nice to reach into keyvalue internals,
+                // but we want to avoid having to copy the whole thing
+                KeyValue kv = KeyValueUtil.ensureKeyValue(c);
+                //pass the begin ts, this value is checked in hbase and then written over with local clock
+                Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), bts);
+                tsput.add(kv);
+                // Add the shadow cell
+                tsput.add(CellUtil.cloneFamily(c),
+                        CellUtils.addShadowCellSuffix(CellUtil.cloneQualifier(c)),
+                        HConstants.LATEST_TIMESTAMP,					// This is later updated to the local HRegion timestamp
+                        Bytes.toBytes(TransactionTimestamp.SINGLETON_TIMESTAMP));
+            }
+        }
+
+        // Get the first cell (just in order not to break the API)
+        Cell cell = kvs.values().iterator().next().get(0);
+        byte[] family = CellUtil.cloneFamily(cell);
+        byte[] qualifier = CellUtil.cloneQualifier(cell);
+
+        if (!table.checkSingletonAndPut(put.getRow(), family, qualifier, null, tsput))
+            throw new AbortException();
+    }
+
+
+
+
+    private boolean isCellSingleton(Cell cell) {
 		return TransactionTimestamp.isSingleton(cell.getTimestamp());
 	}
 
