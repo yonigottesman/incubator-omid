@@ -267,6 +267,7 @@ public class TSOClient implements TSOProtocol, NodeCacheListener {
 
     }
 
+    @Override
     public boolean isLowLatency() {
         return lowLatency;
     }
