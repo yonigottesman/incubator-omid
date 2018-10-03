@@ -337,7 +337,7 @@ public class TestShadowCells extends OmidTestBase {
                     Table htable = table.getHTable();
                     Table healer = table.getHTable();
 
-                    final SnapshotFilter snapshotFilter = spy(new SnapshotFilterImpl(new HTableAccessWrapper(htable, healer)));
+                    final SnapshotFilterImpl snapshotFilter = spy(new SnapshotFilterImpl(new HTableAccessWrapper(htable, healer)));
                     final TTable table = new TTable(htable ,snapshotFilter);
                     doAnswer(new Answer<List<KeyValue>>() {
                         @SuppressWarnings("unchecked")

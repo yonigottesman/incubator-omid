@@ -15,25 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.omid.transaction;
+package org.apache.omid.tso;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
+import java.util.concurrent.Future;
 
-import org.apache.hadoop.hbase.Cell;
-import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.Result;
-import org.apache.hadoop.hbase.client.ResultScanner;
-import org.apache.hadoop.hbase.client.Scan;
-import org.apache.omid.committable.CommitTable.CommitTimestamp;
-
-import com.google.common.base.Optional;
-
-public interface SnapshotFilter {
-    
-    Result get(Get get, HBaseTransaction transaction) throws IOException;
-
-    ResultScanner getScanner(Scan scan, HBaseTransaction transaction) throws IOException;
-
+public interface LowWatermarkWriter {
+    Future<Void> persistLowWatermark(final long lowWatermark);
 }
