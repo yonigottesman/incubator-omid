@@ -122,8 +122,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
             throws IOException {
 
         if (get.getAttribute(CellUtils.CLIENT_GET_ATTRIBUTE) == null) return;
-
-        boolean isLowLatency = Boolean.valueOf(Bytes.toString(get.getAttribute(CellUtils.LL_ATTRIBUTE)));
+        boolean isLowLatency = Bytes.toBoolean(get.getAttribute(CellUtils.LL_ATTRIBUTE));
         HBaseTransaction hbaseTransaction = getHBaseTransaction(get.getAttribute(CellUtils.TRANSACTION_ATTRIBUTE),
                 isLowLatency);
         SnapshotFilterImpl snapshotFilter = getSnapshotFilter(e);

@@ -360,7 +360,7 @@ public abstract class AbstractTransactionManager implements TransactionManager {
             throws RollbackException, TransactionException {
         try {
 
-            long commitTs = tsoClient.commit(tx.getStartTimestamp(), tx.getWriteSet()).get();
+            long commitTs = tsoClient.commit(tx.getStartTimestamp(), tx.getWriteSet(), tx.getConflictFreeWriteSet()).get();
             boolean commited = commitTableWriter.atomicAddCommittedTransaction(tx.getStartTimestamp(),commitTs);
             if (!commited) {
                 // Trasaction has been invalidated by other client

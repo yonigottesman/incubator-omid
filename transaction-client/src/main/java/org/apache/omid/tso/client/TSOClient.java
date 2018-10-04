@@ -253,7 +253,7 @@ public class TSOClient implements TSOProtocol, NodeCacheListener {
     }
 
     /**
-     * @see TSOProtocol#getFence()
+     * @see TSOProtocol#getFence(long)
      */
     @Override
     public TSOFuture<Long> getFence(long tableId) {

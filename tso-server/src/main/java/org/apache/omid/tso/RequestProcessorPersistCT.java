@@ -25,7 +25,7 @@ import java.io.IOException;
 
 public class RequestProcessorPersistCT extends AbstractRequestProcessor {
 
-    PersistenceProcessor persistenceProcessor;
+    private final PersistenceProcessor persistenceProcessor;
 
     @Inject
     RequestProcessorPersistCT(MetricsRegistry metrics,
